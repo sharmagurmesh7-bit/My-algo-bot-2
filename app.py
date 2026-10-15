@@ -161,4 +161,4 @@ with right:
         pcr = atm_chain['pe_oi'].sum() / atm_chain['ce_oi'].sum() if atm_chain['ce_oi'].sum()>0 else 0
         st.metric("LIVE PCR", f"{pcr:.2f}")
     else:
-        st.warning("Option chain market hours me hi aayegi (9:15 - 3:30)") Ji Raha vah code
+        
