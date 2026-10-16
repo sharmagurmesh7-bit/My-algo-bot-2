@@ -1,4 +1,3 @@
-# app.py - TOPU TOWER FINAL - FULL COMBO - LIVE + ALERT + EXECUTION + TRAILING
 import streamlit as st
 import pandas as pd
 import os
