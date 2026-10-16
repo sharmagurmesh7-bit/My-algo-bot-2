@@ -6,11 +6,13 @@ from upstox_client.api import HistoryApi, MarketQuoteApi, OrderApi
 from upstox_client.models import PlaceOrderRequest
 from datetime import datetime, timedelta
 
+# --- 1. PAGE CONFIG ---
 st.set_page_config(page_title="TOPU TOWER FINAL", layout="wide", page_icon="🚀")
 
+# --- 2. TOKEN CHECK ---
 TOKEN = os.environ.get("UPSTOX_TOKEN")
 if not TOKEN:
-    st.error("UPSTOX_TOKEN Render me nahi hai!")
+    st.error("UPSTOX_TOKEN Render Environment me nahi hai!")
     st.stop()
 
 configuration = upstox_client.Configuration()
@@ -20,6 +22,7 @@ history_api = HistoryApi(api_client)
 market_api = MarketQuoteApi(api_client)
 order_api = OrderApi(api_client)
 
+# --- 3. INSTRUMENT MAP ---
 INSTRUMENT_MAP = {
     "SENSEX": "BSE_INDEX|SENSEX",
     "NIFTY": "NSE_INDEX|Nifty 50",
@@ -31,6 +34,7 @@ OPTION_MAP = {
     "SENSEX_PUT": "BSE_FO|SENSEX24OCT72700PE",
 }
 
+# --- 4. FUNCTION 1: LIVE CANDLES ---
 def get_live_candles(symbol_key):
     try:
         instrument = INSTRUMENT_MAP.get(symbol_key)
@@ -42,11 +46,16 @@ def get_live_candles(symbol_key):
         )
         df = pd.DataFrame(response.data.candles, columns=['timestamp','open','high','low','close','volume','oi'])
         df['timestamp'] = pd.to_datetime(df['timestamp'])
+        for col in ['open','high','low','close','volume']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
         df = df.sort_values('timestamp')
+        df = df.dropna()
         return df
     except Exception as e:
+        st.error(f"Candle Error: {e}")
         return pd.DataFrame()
 
+# --- 5. FUNCTION 2: LIVE LTP ---
 def get_live_ltp(symbol_key):
     try:
         instrument = INSTRUMENT_MAP.get(symbol_key)
@@ -55,17 +64,35 @@ def get_live_ltp(symbol_key):
     except:
         return 0.0
 
+# --- 6. FUNCTION 3: PLACE ORDER ---
 def place_order(instrument_key, qty, side):
     try:
         req = PlaceOrderRequest(
-            quantity=qty, product="D", validity="DAY", price=0, tag="TOPU_TOWER",
-            instrument_token=instrument_key, order_type="MARKET",
-            transaction_type=side, disclosed_quantity=0, trigger_price=0, is_amo=False
+            quantity=qty,
+            product="D",
+            validity="DAY",
+            price=0,
+            tag="TOPU_TOWER",
+            instrument_token=instrument_key,
+            order_type="MARKET",
+            transaction_type=side,
+            disclosed_quantity=0,
+            trigger_price=0,
+            is_amo=False
         )
         response = order_api.place_order(req, api_version="2.0")
         return True, str(response)
     except Exception as e:
         return False, str(e)
+
+# --- 7. FUNCTION 4: LOAD LIVE DATA (CACHE) ---
+@st.cache_data(ttl=20)
+def load_live_data(symbol):
+    df = get_live_candles(symbol)
+    ltp = get_live_ltp(symbol)
+    if ltp == 0 and not df.empty:
+        ltp = df['close'].iloc[-1]
+    return df, ltp
 
 # --- SESSION STATE ---
 if 'confirm' not in st.session_state:
@@ -76,7 +103,7 @@ if 'trailing_active' not in st.session_state:
     st.session_state.highest_profit = 0
     st.session_state.current_sl = 0
 
-# --- UI ---
+# --- 8. UI START ---
 st.title("🚀 TOPU TOWER - FINAL SUPER COMBO")
 
 top1, top2, top3, top4 = st.columns(4)
@@ -88,20 +115,13 @@ TRAILING_GAP = top4.number_input("TRAILING GAP", value=50)
 if st.button("🔄 LIVE REFRESH"):
     st.cache_data.clear()
 
-@st.cache_data(ttl=20)
-def load_live_data(symbol):
-    df = get_live_candles(symbol)
-    ltp = get_live_ltp(symbol)
-    if ltp == 0 and not df.empty:
-        ltp = df['close'].iloc[-1]
-    return df, ltp
-
 df, live_ltp = load_live_data(SYMBOL)
 
 if df.empty:
     st.error("Market band hai ya Token expire!")
     st.stop()
 
+# --- 9. FUNCTION 5: INDICATOR CALCULATION ---
 df['ema_fast'] = df['close'].ewm(span=9).mean()
 df['ema_slow'] = df['close'].ewm(span=21).mean()
 df['upper'] = df['high'].rolling(20).max()
@@ -116,6 +136,7 @@ if ema_trend == "BULLISH" and open_trend == "BULLISH":
 else:
     final = "FINAL BEARISH ❌"
 
+# --- METRICS ---
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric(f"{SYMBOL} LTP", f"{live_ltp:.1f}", f"{live_ltp-day_open:+.1f}")
 c2.metric("DAY OPEN", f"{day_open:.1f}")
@@ -123,14 +144,14 @@ c3.metric("EMA TREND", ema_trend)
 c4.metric("OPEN TREND", open_trend)
 c5.metric("CHANNEL", f"{df['lower'].iloc[-1]:.0f}-{df['upper'].iloc[-1]:.0f}")
 
-# --- ALERT BOX ---
+# --- 10. ALERT PANEL ---
 st.divider()
 if "BULLISH" in final:
     st.success(f"🔔 ALERT: {SYMBOL} {final} - CALL READY | LTP {live_ltp:.0f}")
 else:
     st.error(f"🔔 ALERT: {SYMBOL} {final} - PUT READY | LTP {live_ltp:.0f}")
 
-# --- EXECUTION PANEL WITH YES/NO ---
+# --- 11. EXECUTION PANEL WITH YES/NO ---
 st.subheader("⚔️ EXECUTION PANEL - YES/NO")
 ec1, ec2 = st.columns(2)
 with ec1:
@@ -163,7 +184,7 @@ if st.session_state.confirm:
             st.session_state.confirm = False
             st.info("Cancelled!")
 
-# --- TRAILING SL MANAGER ---
+# --- 12. TRAILING SL MANAGER ---
 st.divider()
 st.subheader("📈 TRAILING SL MANAGER")
 
@@ -183,22 +204,23 @@ with ct2:
 if st.session_state.trailing_active:
     if live_ltp > st.session_state.highest_profit:
         st.session_state.highest_profit = live_ltp
-
     new_sl = st.session_state.highest_profit - TRAILING_GAP
     if new_sl > st.session_state.current_sl:
         st.session_state.current_sl = new_sl
-
     profit = live_ltp - st.session_state.entry_price
     tm1, tm2, tm3, tm4 = st.columns(4)
     tm1.metric("Entry", f"{st.session_state.entry_price:.0f}")
     tm2.metric("Trailing SL", f"{st.session_state.current_sl:.0f}")
     tm3.metric("Highest", f"{st.session_state.highest_profit:.0f}")
     tm4.metric("PnL", f"{profit:.0f}", f"{profit:.0f}")
-
     if live_ltp <= st.session_state.current_sl:
         st.error(f"🚨 TRAILING SL HIT! Exit at {live_ltp:.0f}")
         st.session_state.trailing_active = False
 
-# --- CHART ---
-st.area_chart(df.tail(100).set_index('timestamp')['close'])
-st.caption(f"SL: {live_ltp - SL_POINTS:.0f} | TGT: {live_ltp + (SL_POINTS*1.5):.0f} | LIVE: {SYMBOL}")
+# --- 13. CHART - FIXED ---
+st.divider()
+st.subheader("📊 LIVE CHART")
+df['close'] = pd.to_numeric(df['close'], errors='coerce')
+chart_df = df.tail(100).copy().dropna(subset=['close'])
+st.line_chart(chart_df.set_index('timestamp')['close'])
+st.caption(f"SL: {live_ltp - SL_POINTS:.0f} | TGT: {live_ltp + (SL_POINTS*1.5):.0f} | LIVE: {SYMBOL} | Time: {datetime.now().strftime('%H:%M:%S')}")
